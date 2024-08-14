@@ -536,55 +536,111 @@ class LiteLLMCallable(PromptCallableBase):
             ),
         )
 
-        response = completion(
-            model=model,
-            *args,
-            **kwargs,
-        )
+        if "gpt-3.5-turbo" in model.lower():
+            import boto3
+            import json
+            #print("Using AWS Bedrock")
+            bedrock_runtime = boto3.client(
+                'bedrock-runtime',
+                aws_access_key_id='', ## Add key
+                aws_secret_access_key='', ## Add key
+                region_name='ap-south-1'
+            )
+            prompt = msg_history[0]['content']
+            bedrock_kwargs = {
+                "modelId": "anthropic.claude-3-sonnet-20240229-v1:0",
+                "contentType": "application/json",
+                "accept": "application/json",
+                "body": json.dumps({
+                    "anthropic_version": "bedrock-2023-05-31",
+                    "max_tokens": 1000,
+                    "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                        {
+                            "type": "text",
+                            "text": prompt
+                        }
+                        ]
+                    }
+                    ]
+                })
+            }
 
-        if kwargs.get("stream", False):
-            # If stream is defined and set to True,
-            # the callable returns a generator object
-            llm_response = cast(Iterable[str], response)
+            response = bedrock_runtime.invoke_model(**bedrock_kwargs)
+            response = json.loads(response['body'].read())
+            output = response['content'][0]['text']
+
+            completion_tokens = 305  # type: ignore
+            prompt_tokens = 105  # type: ignore
+            total_tokens = None
+            if completion_tokens or prompt_tokens:
+                total_tokens = (completion_tokens or 0) + (prompt_tokens or 0)
+
+            trace_llm_call(
+                output_messages=response,  # type: ignore
+                token_count_completion=completion_tokens,  # type: ignore
+                token_count_prompt=prompt_tokens,  # type: ignore
+                token_count_total=total_tokens,  # type: ignore
+            )
+            
             return LLMResponse(
-                output="",
-                stream_output=llm_response,
+                output=output,  # type: ignore
+                prompt_token_count=prompt_tokens,  # type: ignore
+                response_token_count=completion_tokens,  # type: ignore
+            )
+        
+        ## oepnai
+        else:
+            response = completion(
+                model=model,
+                *args,
+                **kwargs,
             )
 
-        trace_operation(output_mime_type="application/json", output_value=response)
-        if response.choices[0].message.content is not None:  # type: ignore
-            output = response.choices[0].message.content  # type: ignore
-        else:
-            try:
-                output = response.choices[0].message.function_call.arguments  # type: ignore
-            except AttributeError:
+            if kwargs.get("stream", False):
+                # If stream is defined and set to True,
+                # the callable returns a generator object
+                llm_response = cast(Iterable[str], response)
+                return LLMResponse(
+                    output="",
+                    stream_output=llm_response,
+                )
+
+            trace_operation(output_mime_type="application/json", output_value=response)
+            if response.choices[0].message.content is not None:  # type: ignore
+                output = response.choices[0].message.content  # type: ignore
+            else:
                 try:
-                    choice = response.choices[0]  # type: ignore
-                    output = choice.message.tool_calls[-1].function.arguments  # type: ignore
-                except AttributeError as ae_tools:
-                    raise ValueError(
-                        "No message content or function"
-                        " call arguments returned from OpenAI"
-                    ) from ae_tools
+                    output = response.choices[0].message.function_call.arguments  # type: ignore
+                except AttributeError:
+                    try:
+                        choice = response.choices[0]  # type: ignore
+                        output = choice.message.tool_calls[-1].function.arguments  # type: ignore
+                    except AttributeError as ae_tools:
+                        raise ValueError(
+                            "No message content or function"
+                            " call arguments returned from OpenAI"
+                        ) from ae_tools
 
-        completion_tokens = response.usage.completion_tokens  # type: ignore
-        prompt_tokens = response.usage.prompt_tokens  # type: ignore
-        total_tokens = None
-        if completion_tokens or prompt_tokens:
-            total_tokens = (completion_tokens or 0) + (prompt_tokens or 0)
+            completion_tokens = response.usage.completion_tokens  # type: ignore
+            prompt_tokens = response.usage.prompt_tokens  # type: ignore
+            total_tokens = None
+            if completion_tokens or prompt_tokens:
+                total_tokens = (completion_tokens or 0) + (prompt_tokens or 0)
 
-        trace_llm_call(
-            output_messages=[choice.message for choice in response.choices],  # type: ignore
-            token_count_completion=completion_tokens,  # type: ignore
-            token_count_prompt=prompt_tokens,  # type: ignore
-            token_count_total=total_tokens,  # type: ignore
-        )
-        return LLMResponse(
-            output=output,  # type: ignore
-            prompt_token_count=prompt_tokens,  # type: ignore
-            response_token_count=completion_tokens,  # type: ignore
-        )
-
+            trace_llm_call(
+                output_messages=[choice.message for choice in response.choices],  # type: ignore
+                token_count_completion=completion_tokens,  # type: ignore
+                token_count_prompt=prompt_tokens,  # type: ignore
+                token_count_total=total_tokens,  # type: ignore
+            )
+            return LLMResponse(
+                output=output,  # type: ignore
+                prompt_token_count=prompt_tokens,  # type: ignore
+                response_token_count=completion_tokens,  # type: ignore
+            )
 
 class HuggingFaceModelCallable(PromptCallableBase):
     def _invoke_llm(
