@@ -477,7 +477,7 @@ class LiteLLMCallable(PromptCallableBase):
     def _invoke_llm(
         self,
         text: Optional[str] = None,
-        model: str = "gpt-3.5-turbo",
+        model: str = '',
         instructions: Optional[str] = None,
         msg_history: Optional[List[Dict]] = None,
         *args,
@@ -536,14 +536,14 @@ class LiteLLMCallable(PromptCallableBase):
             ),
         )
 
-        if "gpt-3.5-turbo" in model.lower():
+        if "anthropic.claude-3-sonnet" in model.lower():
             import boto3
             import json
             #print("Using AWS Bedrock")
             bedrock_runtime = boto3.client(
                 'bedrock-runtime',
-                aws_access_key_id='', ## Add key
-                aws_secret_access_key='', ## Add key
+                aws_access_key_id='AKIA6GBMF7QWTTIFF', ## Add key
+                aws_secret_access_key='ekVGylkP0UytiZzDZiecoH63NoMH8AiT7', ## Add key
                 region_name='ap-south-1'
             )
             prompt = msg_history[0]['content']
